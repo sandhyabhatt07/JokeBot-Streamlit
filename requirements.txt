@@ -1,2 +1,9 @@
-streamlit
+
 requests
+streamlit
+langchain
+langchain-google-genai
+google-api-core
+tenacity
+python-dotenv
+
