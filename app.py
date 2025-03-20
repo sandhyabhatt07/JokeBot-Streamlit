@@ -14,7 +14,7 @@ load_dotenv()
 api_key = os.getenv("GOOGLE_API_KEY")
 
 # Initialize Google Gemini Model
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-001", temperature=0.9)
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-001", temperature=0.7)
 
 prompt = PromptTemplate(
     input_variables=["topic"],
@@ -36,12 +36,19 @@ You are a joke-telling AI. Your goal is to tell funny jokes based on user reques
 8. **Context Awareness** – Adjust jokes based on the situation (e.g., "at a party," "in a classroom").
 9. **Avoid Joke Repetition** – If the user asks for "one more", generate a completely **new and different** joke on the same topic.
 
+### Examples:
+- **User:** "Tell me a joke about cats in a sarcastic tone."
+  **AI:** "Oh, cats? Yeah, they’re *totally* not aloof and independent. Why don’t they play poker in the wild? Too many cheetahs. Big surprise, huh? 🐱"
+  
+- **User:** "Tell me a Charlie Chaplin-style joke."
+  **AI:** "Imagine this: A man walks into a room, tries to sit in a chair, and—whoops!—it’s not there! He keeps falling, trying to find the chair, but it keeps disappearing. Classic silent comedy move! (Visual gag!)"
+
 Now, respond to this user request:
 User: {topic}
 """
 )
 
-# Create LangChain Model
+# Create LangChain Model (LLMChain)
 chain = LLMChain(llm=llm, prompt=prompt)
 
 # Streamlit UI Setup
@@ -53,6 +60,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_topic" not in st.session_state:
     st.session_state.last_topic = None
+if "used_jokes" not in st.session_state:
+    st.session_state.used_jokes = set()
 
 # Display Chat History
 for user, bot in st.session_state.chat_history:
@@ -76,36 +85,48 @@ def get_joke(topic):
 if user_input:
     with st.chat_message("user"):
         st.write(user_input)
-
+    
     # Handle Stop Requests
     if any(phrase in user_input.lower() for phrase in ["stop", "no more jokes", "enough"]):
         response = "Thanks for your patience! Let me know if you need more jokes later 😊."
-
-    # Handle "One More" Request (Same Topic)
+    
+    # Handle Reactions (haha, lol, funny, etc.)
+    elif user_input.lower() in ["lol", "haha", "hehe", "funny", "that was good", "nice"]:
+        response = "Glad you liked it! Want another one?"
+    
+    # Handle "One More" Request (Avoid Repetition)
     elif user_input.lower() in ["one more", "another one", "again"]:
         if st.session_state.last_topic:
-            different_joke_prompt = f"Tell me a **new and completely different** joke about {st.session_state.last_topic}. Do **not** repeat the previous joke."
+            different_joke_prompt = f"Tell me a **new and completely different** joke about {st.session_state.last_topic}. Do **not** repeat previous jokes."
             try:
-                response_dict = get_joke(different_joke_prompt)
-                response = response_dict["text"]
+                while True:
+                    response_dict = get_joke(different_joke_prompt)
+                    response = response_dict["text"]
+                    if response not in st.session_state.used_jokes:
+                        st.session_state.used_jokes.add(response)
+                        break
             except ResourceExhausted:
                 st.warning("⚠️ API limit reached! Try again later.")
                 response = "I'm out of jokes for now!"
         else:
             response = "I don't remember the last topic! Please ask for a joke first. 😊"
-
+    
     # Handle General Joke Requests
     else:
         st.session_state.last_topic = user_input
         try:
-            response_dict = get_joke(user_input)
-            response = response_dict["text"]
+            while True:
+                response_dict = get_joke(user_input)
+                response = response_dict["text"]
+                if response not in st.session_state.used_jokes:
+                    st.session_state.used_jokes.add(response)
+                    break
         except ResourceExhausted:
             st.warning("⚠️ API limit reached! Try again later.")
             response = "I'm out of jokes for now!"
-
+    
     with st.chat_message("assistant"):
         st.write(response)
-
+    
     # Store Chat History
     st.session_state.chat_history.append((user_input, response))
