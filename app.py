@@ -13,14 +13,13 @@ load_dotenv()
 # Retrieve API Key
 api_key = os.getenv("GOOGLE_API_KEY")
 
-# Initialize Google Gemini Model
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-001", temperature=0.7)
+# Initialize Google Gemini Model (Same as Flowise)
+llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-001", temperature=0.9)
 
 prompt = PromptTemplate(
     input_variables=["topic"],
     template="""
 You are a joke-telling AI. Your goal is to tell funny jokes based on user requests while adapting to tone and context.
-
 ### Rules:
 1. **Immediate Response** – If the user asks for a joke, generate a funny response right away.
 2. **Topic Relevance** – Ensure the joke is **strictly related** to the requested topic.
@@ -35,14 +34,6 @@ You are a joke-telling AI. Your goal is to tell funny jokes based on user reques
    - "Thanks for your patience! Let me know if you need more jokes later 😊."
 8. **Context Awareness** – Adjust jokes based on the situation (e.g., "at a party," "in a classroom").
 9. **Avoid Joke Repetition** – If the user asks for "one more", generate a completely **new and different** joke on the same topic.
-
-### Examples:
-- **User:** "Tell me a joke about cats in a sarcastic tone."
-  **AI:** "Oh, cats? Yeah, they’re *totally* not aloof and independent. Why don’t they play poker in the wild? Too many cheetahs. Big surprise, huh? 🐱"
-  
-- **User:** "Tell me a Charlie Chaplin-style joke."
-  **AI:** "Imagine this: A man walks into a room, tries to sit in a chair, and—whoops!—it’s not there! He keeps falling, trying to find the chair, but it keeps disappearing. Classic silent comedy move! (Visual gag!)"
-
 Now, respond to this user request:
 User: {topic}
 """
@@ -55,7 +46,7 @@ chain = LLMChain(llm=llm, prompt=prompt)
 st.title("🤣 JokeBot - AI Joke Generator 🤖")
 st.write("Ask for a joke on any topic!")
 
-# Initialize chat history
+# Initialize chat history and used jokes
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_topic" not in st.session_state:
@@ -75,55 +66,47 @@ user_input = st.chat_input("Enter a joke request...")
 
 # Function to Fetch Joke with Retry Mechanism (Avoid API Limit Issues)
 @tenacity.retry(
-    stop=tenacity.stop_after_attempt(3),
-    wait=tenacity.wait_exponential(multiplier=2, min=5, max=20),
+    stop=tenacity.stop_after_attempt(3),  # Retry 3 times
+    wait=tenacity.wait_exponential(multiplier=2, min=5, max=20),  # Wait: 5s → 10s → 20s
     retry=tenacity.retry_if_exception_type(ResourceExhausted),
 )
 def get_joke(topic):
-    return chain.invoke({"topic": topic})
+    response_dict = chain.invoke({"topic": topic})
+    return response_dict["text"]
 
 if user_input:
     with st.chat_message("user"):
         st.write(user_input)
-    
+
     # Handle Stop Requests
     if any(phrase in user_input.lower() for phrase in ["stop", "no more jokes", "enough"]):
         response = "Thanks for your patience! Let me know if you need more jokes later 😊."
     
-    # Handle Reactions (haha, lol, funny, etc.)
-    elif user_input.lower() in ["lol", "haha", "hehe", "funny", "that was good", "nice"]:
+    # Handle Laughter Responses
+    elif user_input.lower() in ["lol", "haha", "hehe", "😂", "🤣", "funny"]:
         response = "Glad you liked it! Want another one?"
     
-    # Handle "One More" Request (Avoid Repetition)
-    elif user_input.lower() in ["one more", "another one", "again"]:
+    # Handle "One More" Request (Same Topic)
+    elif user_input.lower() in ["one more", "another one", "again", "yes", "yes please"]:
         if st.session_state.last_topic:
-            different_joke_prompt = f"Tell me a **new and completely different** joke about {st.session_state.last_topic}. Do **not** repeat previous jokes."
-            try:
-                while True:
-                    response_dict = get_joke(different_joke_prompt)
-                    response = response_dict["text"]
-                    if response not in st.session_state.used_jokes:
-                        st.session_state.used_jokes.add(response)
-                        break
-            except ResourceExhausted:
-                st.warning("⚠️ API limit reached! Try again later.")
-                response = "I'm out of jokes for now!"
+            attempts = 0
+            new_joke = ""
+            while attempts < 5:
+                new_joke = get_joke(st.session_state.last_topic)
+                if new_joke not in st.session_state.used_jokes:
+                    st.session_state.used_jokes.add(new_joke)
+                    break
+                attempts += 1
+            response = new_joke if new_joke else "I couldn't think of a joke on that topic! Can you try another one?"
         else:
             response = "I don't remember the last topic! Please ask for a joke first. 😊"
     
     # Handle General Joke Requests
     else:
         st.session_state.last_topic = user_input
-        try:
-            while True:
-                response_dict = get_joke(user_input)
-                response = response_dict["text"]
-                if response not in st.session_state.used_jokes:
-                    st.session_state.used_jokes.add(response)
-                    break
-        except ResourceExhausted:
-            st.warning("⚠️ API limit reached! Try again later.")
-            response = "I'm out of jokes for now!"
+        new_joke = get_joke(user_input)
+        st.session_state.used_jokes.add(new_joke)
+        response = new_joke
     
     with st.chat_message("assistant"):
         st.write(response)
